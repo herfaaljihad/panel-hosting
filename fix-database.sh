@@ -5,26 +5,26 @@ echo "🔧 Memperbaiki koneksi database..."
 
 cd /var/www/panel-hosting
 
-# Generate password baru (hanya alphanumeric untuk menghindari masalah escaping)
-DB_PASSWORD=$(openssl rand -hex 16)
-ADMIN_PASSWORD=$(openssl rand -hex 12)
+# Generate password sederhana tanpa karakter special
+DB_PASSWORD="panel$(date +%s)pass"
+ADMIN_PASSWORD="admin$(date +%s)"
 echo "Password database baru: $DB_PASSWORD"
 
 # Reset database user
 echo "[INFO] Resetting database user..."
 sudo mysql -e "DROP USER IF EXISTS 'panel_user'@'localhost';" 2>/dev/null || true
-sudo mysql -e "CREATE USER 'panel_user'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DB_PASSWORD';"
+sudo mysql -e "CREATE USER 'panel_user'@'localhost' IDENTIFIED BY '$DB_PASSWORD';" 
 sudo mysql -e "CREATE DATABASE IF NOT EXISTS hosting_panel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 sudo mysql -e "GRANT ALL PRIVILEGES ON hosting_panel.* TO 'panel_user'@'localhost';"
 sudo mysql -e "FLUSH PRIVILEGES;"
 
-# Update .env file
+# Update .env file menggunakan double quotes untuk menghindari masalah
 echo "[INFO] Updating .env configuration..."
-sudo -u www-data sed -i "s|DB_CONNECTION=.*|DB_CONNECTION=mysql|" .env
-sudo -u www-data sed -i "s|DB_HOST=.*|DB_HOST=127.0.0.1|" .env
-sudo -u www-data sed -i "s|DB_PORT=.*|DB_PORT=3306|" .env
-sudo -u www-data sed -i "s|DB_DATABASE=.*|DB_DATABASE=hosting_panel|" .env
-sudo -u www-data sed -i "s|DB_USERNAME=.*|DB_USERNAME=panel_user|" .env
+sudo -u www-data sed -i 's|DB_CONNECTION=.*|DB_CONNECTION=mysql|' .env
+sudo -u www-data sed -i 's|DB_HOST=.*|DB_HOST=127.0.0.1|' .env  
+sudo -u www-data sed -i 's|DB_PORT=.*|DB_PORT=3306|' .env
+sudo -u www-data sed -i 's|DB_DATABASE=.*|DB_DATABASE=hosting_panel|' .env
+sudo -u www-data sed -i 's|DB_USERNAME=.*|DB_USERNAME=panel_user|' .env
 sudo -u www-data sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|" .env
 
 # Clear cache
@@ -62,6 +62,12 @@ if mysql -u panel_user -p$DB_PASSWORD hosting_panel -e "SELECT 1;" 2>/dev/null; 
                 'email_verified_at' => now(),
                 'role' => 'admin'
             ]
+        );
+        echo 'Admin user created successfully' . PHP_EOL;
+    } catch (Exception \$e) {
+        echo 'Error creating admin user: ' . \$e->getMessage() . PHP_EOL;
+    }
+    "
         );
         echo 'Admin user created successfully' . PHP_EOL;
     } catch (Exception \$e) {
