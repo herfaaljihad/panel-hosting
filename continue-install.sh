@@ -72,18 +72,7 @@ PANEL_PORT="8080"
 echo "[INFO] Panel will be accessible on port: $PANEL_PORT"
 echo "[INFO] Generated admin password: $ADMIN_PASSWORD"
 
-# Update .env with proper database configuration
-sudo -u www-data sed -i 's/DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env
-sudo -u www-data sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
-sudo -u www-data sed -i 's/DB_PORT=.*/DB_PORT=3306/' .env
-sudo -u www-data sed -i 's/DB_DATABASE=.*/DB_DATABASE=hosting_panel/' .env
-sudo -u www-data sed -i 's/DB_USERNAME=.*/DB_USERNAME=panel_user/' .env
-sudo -u www-data sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
-sudo -u www-data sed -i "s|APP_URL=.*|APP_URL=http://$PUBLIC_IP:$PANEL_PORT|" .env
-sudo -u www-data sed -i 's/APP_ENV=.*/APP_ENV=production/' .env
-sudo -u www-data sed -i 's/APP_DEBUG=.*/APP_DEBUG=false/' .env
-
-# Step 10: Setup database user
+# Step 10: Setup database user FIRST before updating .env
 echo "[STEP] Step 10/12: Setting up database..."
 
 # Install SQLite3 extension for PHP if missing
@@ -113,8 +102,20 @@ $MYSQL_CMD -e "CREATE USER 'panel_user'@'localhost' IDENTIFIED BY '$DB_PASSWORD'
 $MYSQL_CMD -e "GRANT ALL PRIVILEGES ON hosting_panel.* TO 'panel_user'@'localhost';"
 $MYSQL_CMD -e "FLUSH PRIVILEGES;"
 
-# Test database connection
-echo "[INFO] Testing database connection..."
+# Update .env with proper database configuration AFTER creating user
+echo "[INFO] Updating .env configuration..."
+sudo -u www-data sed -i 's/DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env
+sudo -u www-data sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+sudo -u www-data sed -i 's/DB_PORT=.*/DB_PORT=3306/' .env
+sudo -u www-data sed -i 's/DB_DATABASE=.*/DB_DATABASE=hosting_panel/' .env
+sudo -u www-data sed -i 's/DB_USERNAME=.*/DB_USERNAME=panel_user/' .env
+sudo -u www-data sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
+sudo -u www-data sed -i "s|APP_URL=.*|APP_URL=http://$PUBLIC_IP:$PANEL_PORT|" .env
+sudo -u www-data sed -i 's/APP_ENV=.*/APP_ENV=production/' .env
+sudo -u www-data sed -i 's/APP_DEBUG=.*/APP_DEBUG=false/' .env
+
+# Clear Laravel cache AFTER updating .env
+echo "[INFO] Clearing Laravel cache..."
 sudo -u www-data php artisan config:clear
 sudo -u www-data php artisan cache:clear
 
@@ -171,29 +172,29 @@ sudo chmod -R 775 /var/www/panel-hosting/bootstrap/cache
 
 # Create admin user using direct PHP script instead of tinker
 echo "[INFO] Creating admin user..."
-cat > /tmp/create_admin.php << 'EOPHP'
+cat > /tmp/create_admin.php << EOPHP
 <?php
 require '/var/www/panel-hosting/vendor/autoload.php';
-$app = require_once '/var/www/panel-hosting/bootstrap/app.php';
-$app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
+\$app = require_once '/var/www/panel-hosting/bootstrap/app.php';
+\$app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 
 try {
     // Use the correct password from environment variable
-    $password = '$ADMIN_PASSWORD';
-    $email = 'admin@$PUBLIC_IP';
+    \$password = '$ADMIN_PASSWORD';
+    \$email = 'admin@$PUBLIC_IP';
     
-    $admin = \App\Models\User::firstOrCreate(
-        ['email' => $email],
+    \$admin = \App\Models\User::firstOrCreate(
+        ['email' => \$email],
         [
             'name' => 'Administrator', 
-            'password' => bcrypt($password),
+            'password' => bcrypt(\$password),
             'email_verified_at' => now(),
             'role' => 'admin'
         ]
     );
-    echo "Admin user created successfully with email: $email\n";
-} catch (Exception $e) {
-    echo "Error creating admin user: " . $e->getMessage() . "\n";
+    echo "Admin user created successfully with email: \$email\\n";
+} catch (Exception \$e) {
+    echo "Error creating admin user: " . \$e->getMessage() . "\\n";
 }
 EOPHP
 
@@ -229,8 +230,8 @@ echo "🎉          INSTALASI BERHASIL COMPLETED!       "
 echo "🎉 ==============================================="
 echo ""
 echo "🌐 Panel URL: http://$PUBLIC_IP:$PANEL_PORT"
-echo "� Username: admin"
-echo "�📧 Email: admin@$PUBLIC_IP"
+echo "👤 Username: admin"
+echo "📧 Email: admin@$PUBLIC_IP"
 echo "🔑 Password: $ADMIN_PASSWORD"
 echo ""
 echo "📊 Server Info:"
