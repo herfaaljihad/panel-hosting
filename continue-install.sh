@@ -73,15 +73,15 @@ echo "[INFO] Panel will be accessible on port: $PANEL_PORT"
 echo "[INFO] Generated admin password: $ADMIN_PASSWORD"
 
 # Update .env with proper database configuration
-sudo -u www-data sed -i 's|DB_CONNECTION=.*|DB_CONNECTION=mysql|' .env
-sudo -u www-data sed -i 's|DB_HOST=.*|DB_HOST=127.0.0.1|' .env
-sudo -u www-data sed -i 's|DB_PORT=.*|DB_PORT=3306|' .env
-sudo -u www-data sed -i 's|DB_DATABASE=.*|DB_DATABASE=hosting_panel|' .env
-sudo -u www-data sed -i 's|DB_USERNAME=.*|DB_USERNAME=panel_user|' .env
-sudo -u www-data sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|" .env
+sudo -u www-data sed -i 's/DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env
+sudo -u www-data sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env
+sudo -u www-data sed -i 's/DB_PORT=.*/DB_PORT=3306/' .env
+sudo -u www-data sed -i 's/DB_DATABASE=.*/DB_DATABASE=hosting_panel/' .env
+sudo -u www-data sed -i 's/DB_USERNAME=.*/DB_USERNAME=panel_user/' .env
+sudo -u www-data sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
 sudo -u www-data sed -i "s|APP_URL=.*|APP_URL=http://$PUBLIC_IP:$PANEL_PORT|" .env
-sudo -u www-data sed -i 's|APP_ENV=.*|APP_ENV=production|' .env
-sudo -u www-data sed -i 's|APP_DEBUG=.*|APP_DEBUG=false|' .env
+sudo -u www-data sed -i 's/APP_ENV=.*/APP_ENV=production/' .env
+sudo -u www-data sed -i 's/APP_DEBUG=.*/APP_DEBUG=false/' .env
 
 # Step 10: Setup database user
 echo "[STEP] Step 10/12: Setting up database..."
@@ -91,11 +91,16 @@ echo "[INFO] Installing PHP SQLite extension..."
 sudo apt-get install -y php8.3-sqlite3 php8.3-mysql
 
 # Get MySQL root password or try without password first
+echo "[INFO] Attempting MySQL connection..."
 if sudo mysql -u root -e "SELECT 1;" 2>/dev/null; then
+    MYSQL_CMD="sudo mysql -u root"
+    echo "[INFO] Connected to MySQL using sudo"
+elif mysql -u root -e "SELECT 1;" 2>/dev/null; then
     MYSQL_CMD="mysql -u root"
+    echo "[INFO] Connected to MySQL without password"
 else
-    # If that fails, try using sudo to connect
-    MYSQL_CMD="sudo mysql"
+    echo "[WARNING] Cannot connect to MySQL as root. Trying with debian-sys-maint..."
+    MYSQL_CMD="sudo mysql --defaults-file=/etc/mysql/debian.cnf"
 fi
 
 # Create database if not exists
@@ -166,26 +171,34 @@ sudo chmod -R 775 /var/www/panel-hosting/bootstrap/cache
 
 # Create admin user using direct PHP script instead of tinker
 echo "[INFO] Creating admin user..."
-sudo -u www-data php -r "
+cat > /tmp/create_admin.php << 'EOPHP'
+<?php
 require '/var/www/panel-hosting/vendor/autoload.php';
-\$app = require_once '/var/www/panel-hosting/bootstrap/app.php';
-\$app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
+$app = require_once '/var/www/panel-hosting/bootstrap/app.php';
+$app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 
 try {
-    \$admin = \App\Models\User::firstOrCreate(
-        ['email' => 'admin@$PUBLIC_IP'],
+    // Use the correct password from environment variable
+    $password = '$ADMIN_PASSWORD';
+    $email = 'admin@$PUBLIC_IP';
+    
+    $admin = \App\Models\User::firstOrCreate(
+        ['email' => $email],
         [
             'name' => 'Administrator', 
-            'password' => bcrypt('$ADMIN_PASSWORD'),
+            'password' => bcrypt($password),
             'email_verified_at' => now(),
             'role' => 'admin'
         ]
     );
-    echo 'Admin user created successfully' . PHP_EOL;
-} catch (Exception \$e) {
-    echo 'Error creating admin user: ' . \$e->getMessage() . PHP_EOL;
+    echo "Admin user created successfully with email: $email\n";
+} catch (Exception $e) {
+    echo "Error creating admin user: " . $e->getMessage() . "\n";
 }
-"
+EOPHP
+
+sudo -u www-data php /tmp/create_admin.php
+rm -f /tmp/create_admin.php
 
 # Save credentials
 sudo tee /root/panel-credentials.txt > /dev/null <<EOF

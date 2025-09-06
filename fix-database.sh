@@ -24,22 +24,32 @@ echo "Password database baru: $DB_PASSWORD"
 echo "Admin password: $ADMIN_PASSWORD"
 echo "Panel port: $PANEL_PORT"
 
-# Reset database user
+# Reset database user and permissions  
 echo "[INFO] Resetting database user..."
-sudo mysql -e "DROP USER IF EXISTS 'panel_user'@'localhost';" 2>/dev/null || true
-sudo mysql -e "CREATE USER 'panel_user'@'localhost' IDENTIFIED BY '$DB_PASSWORD';" 
-sudo mysql -e "CREATE DATABASE IF NOT EXISTS hosting_panel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-sudo mysql -e "GRANT ALL PRIVILEGES ON hosting_panel.* TO 'panel_user'@'localhost';"
-sudo mysql -e "FLUSH PRIVILEGES;"
+# Try different MySQL connection methods
+if sudo mysql -u root -e "SELECT 1;" 2>/dev/null; then
+    MYSQL_CMD="sudo mysql -u root"
+    echo "[INFO] Connected to MySQL using sudo"
+elif mysql -u root -e "SELECT 1;" 2>/dev/null; then
+    MYSQL_CMD="mysql -u root"
+    echo "[INFO] Connected to MySQL without password"
+else
+    echo "[WARNING] Cannot connect to MySQL as root. Trying with debian-sys-maint..."
+    MYSQL_CMD="sudo mysql --defaults-file=/etc/mysql/debian.cnf"
+fi
 
-# Update .env file menggunakan double quotes untuk menghindari masalah
+$MYSQL_CMD -e "DROP USER IF EXISTS 'panel_user'@'localhost';" 2>/dev/null || true
+$MYSQL_CMD -e "CREATE USER 'panel_user'@'localhost' IDENTIFIED BY '$DB_PASSWORD';" 
+$MYSQL_CMD -e "CREATE DATABASE IF NOT EXISTS hosting_panel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+$MYSQL_CMD -e "GRANT ALL PRIVILEGES ON hosting_panel.* TO 'panel_user'@'localhost';"
+$MYSQL_CMD -e "FLUSH PRIVILEGES;"# Update .env file using safe delimiters
 echo "[INFO] Updating .env configuration..."
-sudo -u www-data sed -i 's|DB_CONNECTION=.*|DB_CONNECTION=mysql|' .env
-sudo -u www-data sed -i 's|DB_HOST=.*|DB_HOST=127.0.0.1|' .env  
-sudo -u www-data sed -i 's|DB_PORT=.*|DB_PORT=3306|' .env
-sudo -u www-data sed -i 's|DB_DATABASE=.*|DB_DATABASE=hosting_panel|' .env
-sudo -u www-data sed -i 's|DB_USERNAME=.*|DB_USERNAME=panel_user|' .env
-sudo -u www-data sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|" .env
+sudo -u www-data sed -i 's/DB_CONNECTION=.*/DB_CONNECTION=mysql/' .env
+sudo -u www-data sed -i 's/DB_HOST=.*/DB_HOST=127.0.0.1/' .env  
+sudo -u www-data sed -i 's/DB_PORT=.*/DB_PORT=3306/' .env
+sudo -u www-data sed -i 's/DB_DATABASE=.*/DB_DATABASE=hosting_panel/' .env
+sudo -u www-data sed -i 's/DB_USERNAME=.*/DB_USERNAME=panel_user/' .env
+sudo -u www-data sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
 sudo -u www-data sed -i "s|APP_URL=.*|APP_URL=http://$PUBLIC_IP:$PANEL_PORT|" .env
 
 # Clear cache
@@ -91,32 +101,32 @@ EOF
     sudo a2ensite panel-hosting
     sudo systemctl restart apache2
     
-    sudo -u www-data php -r "
-    require '/var/www/panel-hosting/vendor/autoload.php';
-    \$app = require_once '/var/www/panel-hosting/bootstrap/app.php';
-    \$app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
+    # Create admin user
+    echo "[INFO] Creating admin user..."
+    cat > /tmp/create_admin.php << 'EOPHP'
+<?php
+require '/var/www/panel-hosting/vendor/autoload.php';
+$app = require_once '/var/www/panel-hosting/bootstrap/app.php';
+$app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
 
-    try {
-        \$admin = \App\Models\User::firstOrCreate(
-            ['email' => 'admin@$PUBLIC_IP'],
-            [
-                'name' => 'Administrator', 
-                'password' => bcrypt('$ADMIN_PASSWORD'),
-                'email_verified_at' => now(),
-                'role' => 'admin'
-            ]
-        );
-        echo 'Admin user created successfully' . PHP_EOL;
-    } catch (Exception \$e) {
-        echo 'Error creating admin user: ' . \$e->getMessage() . PHP_EOL;
-    }
-    "
-        );
-        echo 'Admin user created successfully' . PHP_EOL;
-    } catch (Exception \$e) {
-        echo 'Error creating admin user: ' . \$e->getMessage() . PHP_EOL;
-    }
-    "
+try {
+    $admin = \App\Models\User::firstOrCreate(
+        ['email' => 'admin@$PUBLIC_IP'],
+        [
+            'name' => 'Administrator', 
+            'password' => bcrypt('$ADMIN_PASSWORD'),
+            'email_verified_at' => now(),
+            'role' => 'admin'
+        ]
+    );
+    echo "Admin user created successfully\n";
+} catch (Exception $e) {
+    echo "Error creating admin user: " . $e->getMessage() . "\n";
+}
+EOPHP
+
+    sudo -u www-data php /tmp/create_admin.php
+    rm -f /tmp/create_admin.php
     
     # Save credentials
     sudo tee /root/panel-credentials.txt > /dev/null <<EOF
