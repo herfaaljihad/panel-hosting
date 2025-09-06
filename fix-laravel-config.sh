@@ -112,10 +112,10 @@ sudo -u www-data php artisan key:generate --force
 
 # Clear all caches completely
 echo "[INFO] Clearing all Laravel caches..."
-sudo -u www-data php artisan config:clear
-sudo -u www-data php artisan cache:clear
-sudo -u www-data php artisan route:clear
-sudo -u www-data php artisan view:clear
+sudo -u www-data php artisan config:clear 2>/dev/null || true
+sudo -u www-data php artisan cache:clear 2>/dev/null || true
+sudo -u www-data php artisan route:clear 2>/dev/null || true
+sudo -u www-data php artisan view:clear 2>/dev/null || true
 
 # Test database connection
 echo "[INFO] Testing database connection..."
@@ -126,27 +126,61 @@ else
     exit 1
 fi
 
+# Drop and recreate database to ensure clean state
+echo "[INFO] Recreating database for clean state..."
+$MYSQL_CMD -e "DROP DATABASE IF EXISTS hosting_panel;"
+$MYSQL_CMD -e "CREATE DATABASE hosting_panel CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+$MYSQL_CMD -e "GRANT ALL PRIVILEGES ON hosting_panel.* TO 'panel_user'@'localhost';"
+$MYSQL_CMD -e "FLUSH PRIVILEGES;"
+
 # Run migrations fresh
 echo "[INFO] Running fresh migrations..."
-sudo -u www-data php artisan migrate:fresh --force
+sudo -u www-data php artisan migrate --force
 
-# Seed database
-echo "[INFO] Seeding database..."
-sudo -u www-data php artisan db:seed --force
+# Create missing tables manually if needed
+echo "[INFO] Creating missing tables if needed..."
+$MYSQL_CMD hosting_panel << 'EOSQL'
+CREATE TABLE IF NOT EXISTS packages (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+    disk_space INT NOT NULL DEFAULT 1000,
+    bandwidth INT NOT NULL DEFAULT 10000,
+    email_accounts INT NOT NULL DEFAULT 10,
+    databases INT NOT NULL DEFAULT 5,
+    domains INT NOT NULL DEFAULT 1,
+    subdomains INT NOT NULL DEFAULT 10,
+    created_at TIMESTAMP NULL DEFAULT NULL,
+    updated_at TIMESTAMP NULL DEFAULT NULL
+);
 
-# Create admin user using artisan command
+INSERT IGNORE INTO packages (name, description, price, disk_space, bandwidth, email_accounts, databases, domains, subdomains) VALUES
+('Basic', 'Basic hosting package', 9.99, 1000, 10000, 10, 5, 1, 10),
+('Premium', 'Premium hosting package', 19.99, 5000, 50000, 50, 25, 5, 50),
+('Enterprise', 'Enterprise hosting package', 49.99, 20000, 200000, 200, 100, 20, 200);
+
+-- Add role column to users table if not exists
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(50) DEFAULT 'user';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin TINYINT(1) DEFAULT 0;
+EOSQL
+
+# Create admin user using direct SQL
 echo "[INFO] Creating admin user..."
-sudo -u www-data php artisan tinker --execute="
-\$admin = \App\Models\User::firstOrCreate([
-    'email' => 'admin@$PUBLIC_IP'
-], [
-    'name' => 'Administrator',
-    'password' => bcrypt('$ADMIN_PASSWORD'),
-    'email_verified_at' => now(),
-    'role' => 'admin'
-]);
-echo 'Admin user created: ' . \$admin->email;
-"
+ADMIN_EMAIL="admin@$PUBLIC_IP"
+ADMIN_PASSWORD_HASH=$(sudo -u www-data php -r "echo password_hash('$ADMIN_PASSWORD', PASSWORD_DEFAULT);")
+
+$MYSQL_CMD hosting_panel << EOSQL
+INSERT INTO users (name, email, password, role, is_admin, email_verified_at, created_at, updated_at) 
+VALUES ('Administrator', '$ADMIN_EMAIL', '$ADMIN_PASSWORD_HASH', 'admin', 1, NOW(), NOW(), NOW())
+ON DUPLICATE KEY UPDATE 
+password = '$ADMIN_PASSWORD_HASH',
+role = 'admin',
+is_admin = 1,
+updated_at = NOW();
+EOSQL
+
+echo "[INFO] Admin user created successfully!"
 
 # Restart Apache
 echo "[INFO] Restarting Apache..."
