@@ -1,0 +1,164 @@
+<?php
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+
+/**
+ * App\Models\AppInstallation
+ *
+ * @property int $id
+ * @property int $user_id
+ * @property int $domain_id
+ * @property string $app_name
+ * @property string $app_version
+ * @property string $installation_path
+ * @property string|null $database_name
+ * @property string|null $database_user
+ * @property string $admin_username
+ * @property string $admin_email
+ * @property string $app_url
+ * @property string $status
+ * @property string|null $installation_log
+ * @property bool $auto_update
+ * @property bool $backup_enabled
+ * @property bool $ssl_enabled
+ * @property \Illuminate\Support\Carbon|null $installed_at
+ * @property \Illuminate\Support\Carbon|null $last_updated_at
+ * @property \Illuminate\Support\Carbon|null $created_at
+ * @property \Illuminate\Support\Carbon|null $updated_at
+ * @property-read \App\Models\Domain $domain
+ * @property-read \App\Models\User $user
+ */
+class AppInstallation extends Model
+{
+    use HasFactory;
+
+    protected $fillable = [
+        'user_id',
+        'domain_id',
+        'app_name',
+        'app_version',
+        'installation_path',
+        'database_name',
+        'database_user',
+        'admin_username',
+        'admin_email',
+        'app_url',
+        'status',
+        'installation_log',
+        'auto_update',
+        'backup_enabled',
+        'ssl_enabled',
+        'installed_at',
+        'last_updated_at'
+    ];
+
+    protected $casts = [
+        'auto_update' => 'boolean',
+        'backup_enabled' => 'boolean',
+        'ssl_enabled' => 'boolean',
+        'installed_at' => 'datetime',
+        'last_updated_at' => 'datetime'
+    ];
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    public function domain(): BelongsTo
+    {
+        return $this->belongsTo(Domain::class);
+    }
+
+    public function getStatusColorAttribute(): string
+    {
+        return match($this->status) {
+            'installed' => 'success',
+            'installing' => 'warning',
+            'updating' => 'info',
+            'failed' => 'danger',
+            default => 'secondary'
+        };
+    }
+
+    public function getStatusBadgeAttribute(): string
+    {
+        return match($this->status) {
+            'installed' => 'badge-success',
+            'installing' => 'badge-warning',
+            'updating' => 'badge-info',
+            'failed' => 'badge-danger',
+            default => 'badge-secondary'
+        };
+    }
+
+    public function isInstalled(): bool
+    {
+        return $this->status === 'installed';
+    }
+
+    public function isInstalling(): bool
+    {
+        return $this->status === 'installing';
+    }
+
+    public function isFailed(): bool
+    {
+        return $this->status === 'failed';
+    }
+
+    public function canUpdate(): bool
+    {
+        return $this->isInstalled() && $this->auto_update;
+    }
+
+    public function canBackup(): bool
+    {
+        return $this->isInstalled() && $this->backup_enabled;
+    }
+
+    public function getInstallationUrl(): string
+    {
+        $protocol = $this->ssl_enabled ? 'https' : 'http';
+        return $protocol . '://' . $this->domain->name . $this->installation_path;
+    }
+
+    public function getDirectoryPath(): string
+    {
+        return rtrim($this->domain->document_root . $this->installation_path, '/');
+    }
+
+    public function getDatabaseConnection(): array
+    {
+        return [
+            'host' => 'localhost',
+            'database' => $this->database_name,
+            'username' => $this->database_user,
+            'password' => '' // Password should be retrieved securely
+        ];
+    }
+
+    public function scopeInstalled($query)
+    {
+        return $query->where('status', 'installed');
+    }
+
+    public function scopeByUser($query, $userId)
+    {
+        return $query->where('user_id', $userId);
+    }
+
+    public function scopeByDomain($query, $domainId)
+    {
+        return $query->where('domain_id', $domainId);
+    }
+
+    public function scopeByApp($query, $appName)
+    {
+        return $query->where('app_name', $appName);
+    }
+}

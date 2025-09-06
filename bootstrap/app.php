@@ -1,0 +1,33 @@
+<?php
+
+use Illuminate\Foundation\Application;
+use Illuminate\Foundation\Configuration\Exceptions;
+use Illuminate\Foundation\Configuration\Middleware;
+
+return Application::configure(basePath: dirname(__DIR__))
+    ->withRouting(
+        web: __DIR__.'/../routes/web.php',
+        commands: __DIR__.'/../routes/console.php',
+        health: '/up',
+    )
+    ->withMiddleware(function (Middleware $middleware): void {
+        $middleware->group('web', [
+            \Illuminate\Session\Middleware\StartSession::class,
+            \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+            \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            \App\Http\Middleware\SecurityHeaders::class,
+            \App\Http\Middleware\AuditLog::class,
+            // \App\Http\Middleware\SecurityHardeningMiddleware::class, // Temporarily disabled for login
+        ]);
+
+        $middleware->alias([
+            'admin' => \App\Http\Middleware\IsAdmin::class,
+            'owns_resource' => \App\Http\Middleware\EnsureUserOwnsResource::class,
+            'rate.limit' => \App\Http\Middleware\RateLimitMiddleware::class,
+            '2fa' => \App\Http\Middleware\TwoFactorMiddleware::class,
+        ]);
+    })
+    ->withExceptions(function (Exceptions $exceptions): void {
+        //
+    })->create();
