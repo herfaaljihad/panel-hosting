@@ -99,6 +99,15 @@ echo "[INFO] Testing database connection..."
 sudo -u www-data php artisan config:clear
 sudo -u www-data php artisan cache:clear
 
+# Test if we can connect with the new user before proceeding
+echo "[INFO] Verifying database connection..."
+if ! mysql -u panel_user -p$DB_PASSWORD hosting_panel -e "SELECT 1;" 2>/dev/null; then
+    echo "[ERROR] Database connection failed. Retrying with different approach..."
+    # Try to fix the connection
+    $MYSQL_CMD -e "ALTER USER 'panel_user'@'localhost' IDENTIFIED WITH mysql_native_password BY '$DB_PASSWORD';"
+    $MYSQL_CMD -e "FLUSH PRIVILEGES;"
+fi
+
 # Run migrations and seeds
 echo "[INFO] Running database migrations..."
 sudo -u www-data php artisan migrate --force
