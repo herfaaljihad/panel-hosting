@@ -30,7 +30,16 @@ cd panel-hosting
 # Step 8: Install dependencies
 echo "[STEP] Step 8/12: Installing dependencies..."
 sudo -u www-data composer install --no-dev --optimize-autoloader
-sudo -u www-data npm install
+
+# Fix npm cache permission issue
+echo "[INFO] Fixing npm cache permissions..."
+sudo chown -R www-data:www-data /var/www/.npm 2>/dev/null || true
+sudo chown -R www-data:www-data /var/www/.cache 2>/dev/null || true
+
+# Install and build with proper permissions
+echo "[INFO] Installing npm packages..."
+sudo -u www-data npm install --cache /tmp/npm-cache
+echo "[INFO] Building assets..."
 sudo -u www-data npm run build
 
 # Step 9: Configure Laravel
@@ -42,21 +51,38 @@ sudo -u www-data php artisan key:generate --force
 DB_PASSWORD=$(openssl rand -base64 24)
 ADMIN_PASSWORD=$(openssl rand -base64 16)
 
-# Update .env
+# Update .env with proper database configuration
+sudo -u www-data sed -i "s/DB_CONNECTION=.*/DB_CONNECTION=mysql/" .env
+sudo -u www-data sed -i "s/DB_HOST=.*/DB_HOST=127.0.0.1/" .env
+sudo -u www-data sed -i "s/DB_PORT=.*/DB_PORT=3306/" .env
 sudo -u www-data sed -i "s/DB_DATABASE=.*/DB_DATABASE=hosting_panel/" .env
 sudo -u www-data sed -i "s/DB_USERNAME=.*/DB_USERNAME=panel_user/" .env  
 sudo -u www-data sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
 sudo -u www-data sed -i "s/APP_URL=.*/APP_URL=http:\/\/147.139.202.42/" .env
+sudo -u www-data sed -i "s/APP_ENV=.*/APP_ENV=production/" .env
+sudo -u www-data sed -i "s/APP_DEBUG=.*/APP_DEBUG=false/" .env
 
 # Step 10: Setup database user
 echo "[STEP] Step 10/12: Setting up database..."
-mysql -u root -e "DROP USER IF EXISTS 'panel_user'@'localhost';" 2>/dev/null || true
-mysql -u root -e "CREATE USER 'panel_user'@'localhost' IDENTIFIED BY '$DB_PASSWORD';"
-mysql -u root -e "GRANT ALL PRIVILEGES ON hosting_panel.* TO 'panel_user'@'localhost';"
-mysql -u root -e "FLUSH PRIVILEGES;"
 
-# Run migrations
+# Get MySQL root password or try without password first
+if sudo mysql -u root -e "SELECT 1;" 2>/dev/null; then
+    MYSQL_CMD="mysql -u root"
+else
+    # If that fails, try using sudo to connect
+    MYSQL_CMD="sudo mysql"
+fi
+
+# Create database user with new password
+$MYSQL_CMD -e "DROP USER IF EXISTS 'panel_user'@'localhost';" 2>/dev/null || true
+$MYSQL_CMD -e "CREATE USER 'panel_user'@'localhost' IDENTIFIED BY '$DB_PASSWORD';"
+$MYSQL_CMD -e "GRANT ALL PRIVILEGES ON hosting_panel.* TO 'panel_user'@'localhost';"
+$MYSQL_CMD -e "FLUSH PRIVILEGES;"
+
+# Run migrations and seeds
+echo "[INFO] Running database migrations..."
 sudo -u www-data php artisan migrate --force
+echo "[INFO] Seeding database..."
 sudo -u www-data php artisan db:seed --force
 
 # Step 11: Configure Apache
@@ -90,8 +116,14 @@ sudo chmod -R 775 /var/www/panel-hosting/bootstrap/cache
 
 # Create admin user
 echo "[INFO] Creating admin user..."
-sudo -u www-data php artisan tinker --execute="
-\$admin = App\Models\User::firstOrCreate(
+
+# Create admin user using direct PHP script instead of tinker
+sudo -u www-data php -r "
+require '/var/www/panel-hosting/vendor/autoload.php';
+\$app = require_once '/var/www/panel-hosting/bootstrap/app.php';
+\$app->make('Illuminate\Contracts\Console\Kernel')->bootstrap();
+
+\$admin = \App\Models\User::firstOrCreate(
     ['email' => 'admin@147.139.202.42'],
     [
         'name' => 'Administrator', 
@@ -100,7 +132,7 @@ sudo -u www-data php artisan tinker --execute="
         'role' => 'admin'
     ]
 );
-echo 'Admin user ready';
+echo 'Admin user created successfully' . PHP_EOL;
 "
 
 # Save credentials
