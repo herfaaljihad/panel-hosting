@@ -5,10 +5,24 @@ echo "🔧 Memperbaiki koneksi database..."
 
 cd /var/www/panel-hosting
 
+# Deteksi IP publik otomatis
+echo "[INFO] Detecting public IP address..."
+PUBLIC_IP=$(curl -s ifconfig.me || curl -s ipinfo.io/ip || curl -s icanhazip.com)
+if [ -z "$PUBLIC_IP" ]; then
+    PUBLIC_IP="localhost"
+    echo "[WARNING] Could not detect public IP, using localhost"
+else
+    echo "[INFO] Detected public IP: $PUBLIC_IP"
+fi
+
 # Generate password sederhana tanpa karakter special
 DB_PASSWORD="panel$(date +%s)pass"
-ADMIN_PASSWORD="admin$(date +%s)"
+ADMIN_PASSWORD=$(openssl rand -hex 8)
+PANEL_PORT="8080"
+
 echo "Password database baru: $DB_PASSWORD"
+echo "Admin password: $ADMIN_PASSWORD"
+echo "Panel port: $PANEL_PORT"
 
 # Reset database user
 echo "[INFO] Resetting database user..."
@@ -26,6 +40,7 @@ sudo -u www-data sed -i 's|DB_PORT=.*|DB_PORT=3306|' .env
 sudo -u www-data sed -i 's|DB_DATABASE=.*|DB_DATABASE=hosting_panel|' .env
 sudo -u www-data sed -i 's|DB_USERNAME=.*|DB_USERNAME=panel_user|' .env
 sudo -u www-data sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|" .env
+sudo -u www-data sed -i "s|APP_URL=.*|APP_URL=http://$PUBLIC_IP:$PANEL_PORT|" .env
 
 # Clear cache
 echo "[INFO] Clearing Laravel cache..."
@@ -48,6 +63,34 @@ if mysql -u panel_user -p$DB_PASSWORD hosting_panel -e "SELECT 1;" 2>/dev/null; 
     # Create admin user
     echo "[INFO] Creating admin user..."
     
+    # Update Apache configuration for custom port
+    echo "[INFO] Updating Apache configuration..."
+    sudo tee /etc/apache2/sites-available/panel-hosting.conf > /dev/null <<EOF
+Listen $PANEL_PORT
+
+<VirtualHost *:$PANEL_PORT>
+    ServerName $PUBLIC_IP
+    DocumentRoot /var/www/panel-hosting/public
+    
+    <Directory /var/www/panel-hosting/public>
+        AllowOverride All
+        Require all granted
+        DirectoryIndex index.php
+    </Directory>
+    
+    ErrorLog \${APACHE_LOG_DIR}/panel-hosting_error.log
+    CustomLog \${APACHE_LOG_DIR}/panel-hosting_access.log combined
+</VirtualHost>
+EOF
+
+    # Add port to Apache ports.conf if not already present
+    if ! grep -q "Listen $PANEL_PORT" /etc/apache2/ports.conf; then
+        echo "Listen $PANEL_PORT" | sudo tee -a /etc/apache2/ports.conf
+    fi
+    
+    sudo a2ensite panel-hosting
+    sudo systemctl restart apache2
+    
     sudo -u www-data php -r "
     require '/var/www/panel-hosting/vendor/autoload.php';
     \$app = require_once '/var/www/panel-hosting/bootstrap/app.php';
@@ -55,7 +98,7 @@ if mysql -u panel_user -p$DB_PASSWORD hosting_panel -e "SELECT 1;" 2>/dev/null; 
 
     try {
         \$admin = \App\Models\User::firstOrCreate(
-            ['email' => 'admin@147.139.202.42'],
+            ['email' => 'admin@$PUBLIC_IP'],
             [
                 'name' => 'Administrator', 
                 'password' => bcrypt('$ADMIN_PASSWORD'),
@@ -81,24 +124,48 @@ if mysql -u panel_user -p$DB_PASSWORD hosting_panel -e "SELECT 1;" 2>/dev/null; 
    LARAVEL HOSTING PANEL CREDENTIALS
 =====================================
 
-Panel URL: http://147.139.202.42
-Admin Email: admin@147.139.202.42
+Panel URL: http://$PUBLIC_IP:$PANEL_PORT
+Admin Username: admin
+Admin Email: admin@$PUBLIC_IP
 Admin Password: $ADMIN_PASSWORD
 
 Database:
 - Username: panel_user  
 - Password: $DB_PASSWORD
 
+Server Details:
+- Public IP: $PUBLIC_IP
+- Panel Port: $PANEL_PORT
+
 Installation Date: $(date)
 =====================================
 EOF
     
     echo ""
-    echo "✅ Database fixed successfully!"
-    echo "🌐 Panel URL: http://147.139.202.42"
-    echo "📧 Email: admin@147.139.202.42"
+    echo "🎉 ==============================================="
+    echo "🎉        DATABASE FIXED SUCCESSFULLY!         "
+    echo "🎉 ==============================================="
+    echo ""
+    echo "🌐 Panel URL: http://$PUBLIC_IP:$PANEL_PORT"
+    echo "👤 Username: admin"
+    echo "📧 Email: admin@$PUBLIC_IP"
     echo "🔑 Password: $ADMIN_PASSWORD"
+    echo ""
+    echo "📊 Server Info:"
+    echo "   • Public IP: $PUBLIC_IP"
+    echo "   • Panel Port: $PANEL_PORT"
+    echo "   • Database: hosting_panel"
+    echo ""
     echo "📁 Credentials saved to: /root/panel-credentials.txt"
+    echo ""
+    echo "🚀 Akses panel hosting di:"
+    echo "   http://$PUBLIC_IP:$PANEL_PORT"
+    echo ""
+    echo "🔐 Login menggunakan:"
+    echo "   Username: admin"  
+    echo "   Password: $ADMIN_PASSWORD"
+    echo ""
+    echo "🎉 ==============================================="
     
 else
     echo "❌ Database connection failed!"

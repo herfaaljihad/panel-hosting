@@ -54,20 +54,34 @@ echo "[STEP] Step 9/12: Configuring Laravel..."
 sudo -u www-data cp .env.example .env
 sudo -u www-data php artisan key:generate --force
 
-# Generate secure passwords
-DB_PASSWORD=$(openssl rand -base64 24)
-ADMIN_PASSWORD=$(openssl rand -base64 16)
+# Deteksi IP publik otomatis
+echo "[INFO] Detecting public IP address..."
+PUBLIC_IP=$(curl -s ifconfig.me || curl -s ipinfo.io/ip || curl -s icanhazip.com)
+if [ -z "$PUBLIC_IP" ]; then
+    PUBLIC_IP="localhost"
+    echo "[WARNING] Could not detect public IP, using localhost"
+else
+    echo "[INFO] Detected public IP: $PUBLIC_IP"
+fi
+
+# Generate secure passwords (timestamp-based untuk menghindari karakter special)
+DB_PASSWORD="panel$(date +%s)db"
+ADMIN_PASSWORD=$(openssl rand -hex 8)
+PANEL_PORT="8080"
+
+echo "[INFO] Panel will be accessible on port: $PANEL_PORT"
+echo "[INFO] Generated admin password: $ADMIN_PASSWORD"
 
 # Update .env with proper database configuration
-sudo -u www-data sed -i "s/DB_CONNECTION=.*/DB_CONNECTION=mysql/" .env
-sudo -u www-data sed -i "s/DB_HOST=.*/DB_HOST=127.0.0.1/" .env
-sudo -u www-data sed -i "s/DB_PORT=.*/DB_PORT=3306/" .env
-sudo -u www-data sed -i "s/DB_DATABASE=.*/DB_DATABASE=hosting_panel/" .env
-sudo -u www-data sed -i "s/DB_USERNAME=.*/DB_USERNAME=panel_user/" .env  
-sudo -u www-data sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
-sudo -u www-data sed -i "s|APP_URL=.*|APP_URL=http://147.139.202.42|" .env
-sudo -u www-data sed -i "s/APP_ENV=.*/APP_ENV=production/" .env
-sudo -u www-data sed -i "s/APP_DEBUG=.*/APP_DEBUG=false/" .env
+sudo -u www-data sed -i 's|DB_CONNECTION=.*|DB_CONNECTION=mysql|' .env
+sudo -u www-data sed -i 's|DB_HOST=.*|DB_HOST=127.0.0.1|' .env
+sudo -u www-data sed -i 's|DB_PORT=.*|DB_PORT=3306|' .env
+sudo -u www-data sed -i 's|DB_DATABASE=.*|DB_DATABASE=hosting_panel|' .env
+sudo -u www-data sed -i 's|DB_USERNAME=.*|DB_USERNAME=panel_user|' .env
+sudo -u www-data sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|" .env
+sudo -u www-data sed -i "s|APP_URL=.*|APP_URL=http://$PUBLIC_IP:$PANEL_PORT|" .env
+sudo -u www-data sed -i 's|APP_ENV=.*|APP_ENV=production|' .env
+sudo -u www-data sed -i 's|APP_DEBUG=.*|APP_DEBUG=false|' .env
 
 # Step 10: Setup database user
 echo "[STEP] Step 10/12: Setting up database..."
@@ -115,10 +129,12 @@ echo "[INFO] Seeding database..."
 sudo -u www-data php artisan db:seed --force
 
 # Step 11: Configure Apache
-echo "[STEP] Step 11/12: Configuring Apache..."
+echo "[STEP] Step 11/12: Configuring Apache with custom port..."
 sudo tee /etc/apache2/sites-available/panel-hosting.conf > /dev/null <<EOF
-<VirtualHost *:80>
-    ServerName 147.139.202.42
+Listen $PANEL_PORT
+
+<VirtualHost *:$PANEL_PORT>
+    ServerName $PUBLIC_IP
     DocumentRoot /var/www/panel-hosting/public
     
     <Directory /var/www/panel-hosting/public>
@@ -131,6 +147,11 @@ sudo tee /etc/apache2/sites-available/panel-hosting.conf > /dev/null <<EOF
     CustomLog \${APACHE_LOG_DIR}/panel-hosting_access.log combined
 </VirtualHost>
 EOF
+
+# Add port to Apache ports.conf if not already present
+if ! grep -q "Listen $PANEL_PORT" /etc/apache2/ports.conf; then
+    echo "Listen $PANEL_PORT" | sudo tee -a /etc/apache2/ports.conf
+fi
 
 sudo a2dissite 000-default 2>/dev/null || true
 sudo a2ensite panel-hosting
@@ -152,7 +173,7 @@ require '/var/www/panel-hosting/vendor/autoload.php';
 
 try {
     \$admin = \App\Models\User::firstOrCreate(
-        ['email' => 'admin@147.139.202.42'],
+        ['email' => 'admin@$PUBLIC_IP'],
         [
             'name' => 'Administrator', 
             'password' => bcrypt('$ADMIN_PASSWORD'),
@@ -172,21 +193,45 @@ sudo tee /root/panel-credentials.txt > /dev/null <<EOF
    LARAVEL HOSTING PANEL CREDENTIALS
 =====================================
 
-Panel URL: http://147.139.202.42
-Admin Email: admin@147.139.202.42
+Panel URL: http://$PUBLIC_IP:$PANEL_PORT
+Admin Username: admin
+Admin Email: admin@$PUBLIC_IP
 Admin Password: $ADMIN_PASSWORD
 
 Database:
 - Username: panel_user  
 - Password: $DB_PASSWORD
 
+Server Details:
+- Public IP: $PUBLIC_IP
+- Panel Port: $PANEL_PORT
+
 Installation Date: $(date)
 =====================================
 EOF
 
 echo ""
-echo "✅ Installation completed!"
-echo "🌐 Panel URL: http://147.139.202.42"
-echo "📧 Email: admin@147.139.202.42"
+echo "🎉 ==============================================="
+echo "🎉          INSTALASI BERHASIL COMPLETED!       "
+echo "🎉 ==============================================="
+echo ""
+echo "🌐 Panel URL: http://$PUBLIC_IP:$PANEL_PORT"
+echo "� Username: admin"
+echo "�📧 Email: admin@$PUBLIC_IP"
 echo "🔑 Password: $ADMIN_PASSWORD"
+echo ""
+echo "📊 Server Info:"
+echo "   • Public IP: $PUBLIC_IP"
+echo "   • Panel Port: $PANEL_PORT"
+echo "   • Database: hosting_panel"
+echo ""
 echo "📁 Full credentials saved to: /root/panel-credentials.txt"
+echo ""
+echo "🚀 Anda sekarang bisa mengakses panel hosting di:"
+echo "   http://$PUBLIC_IP:$PANEL_PORT"
+echo ""
+echo "🔐 Login menggunakan:"
+echo "   Username: admin"  
+echo "   Password: $ADMIN_PASSWORD"
+echo ""
+echo "🎉 ==============================================="
