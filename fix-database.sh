@@ -5,8 +5,9 @@ echo "🔧 Memperbaiki koneksi database..."
 
 cd /var/www/panel-hosting
 
-# Generate password baru
-DB_PASSWORD=$(openssl rand -base64 24)
+# Generate password baru (hanya alphanumeric untuk menghindari masalah escaping)
+DB_PASSWORD=$(openssl rand -hex 16)
+ADMIN_PASSWORD=$(openssl rand -hex 12)
 echo "Password database baru: $DB_PASSWORD"
 
 # Reset database user
@@ -19,12 +20,12 @@ sudo mysql -e "FLUSH PRIVILEGES;"
 
 # Update .env file
 echo "[INFO] Updating .env configuration..."
-sudo -u www-data sed -i "s/DB_CONNECTION=.*/DB_CONNECTION=mysql/" .env
-sudo -u www-data sed -i "s/DB_HOST=.*/DB_HOST=127.0.0.1/" .env
-sudo -u www-data sed -i "s/DB_PORT=.*/DB_PORT=3306/" .env
-sudo -u www-data sed -i "s/DB_DATABASE=.*/DB_DATABASE=hosting_panel/" .env
-sudo -u www-data sed -i "s/DB_USERNAME=.*/DB_USERNAME=panel_user/" .env
-sudo -u www-data sed -i "s/DB_PASSWORD=.*/DB_PASSWORD=$DB_PASSWORD/" .env
+sudo -u www-data sed -i "s|DB_CONNECTION=.*|DB_CONNECTION=mysql|" .env
+sudo -u www-data sed -i "s|DB_HOST=.*|DB_HOST=127.0.0.1|" .env
+sudo -u www-data sed -i "s|DB_PORT=.*|DB_PORT=3306|" .env
+sudo -u www-data sed -i "s|DB_DATABASE=.*|DB_DATABASE=hosting_panel|" .env
+sudo -u www-data sed -i "s|DB_USERNAME=.*|DB_USERNAME=panel_user|" .env
+sudo -u www-data sed -i "s|DB_PASSWORD=.*|DB_PASSWORD=$DB_PASSWORD|" .env
 
 # Clear cache
 echo "[INFO] Clearing Laravel cache..."
@@ -46,7 +47,6 @@ if mysql -u panel_user -p$DB_PASSWORD hosting_panel -e "SELECT 1;" 2>/dev/null; 
     
     # Create admin user
     echo "[INFO] Creating admin user..."
-    ADMIN_PASSWORD=$(openssl rand -base64 16)
     
     sudo -u www-data php -r "
     require '/var/www/panel-hosting/vendor/autoload.php';
