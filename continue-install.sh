@@ -134,9 +134,6 @@ sudo chmod -R 755 /var/www/panel-hosting
 sudo chmod -R 775 /var/www/panel-hosting/storage
 sudo chmod -R 775 /var/www/panel-hosting/bootstrap/cache
 
-# Create admin user
-echo "[INFO] Creating admin user..."
-
 # Create admin user using direct PHP script instead of tinker
 echo "[INFO] Creating admin user..."
 sudo -u www-data php -r "
